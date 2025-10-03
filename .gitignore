@@ -42,6 +42,7 @@ temp_audio_*
 
 # Logs
 *.log
+debug_log.json
 
 # OS
 .DS_Store

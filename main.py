@@ -15,6 +15,7 @@ from audio_capture import AudioCapture
 from stt_service import STTService
 from openai_agent import OpenAIAgent, IntentProcessor
 from tts_service import TTSService
+from debug_logger import debug_logger
 
 class RealTimeConversationApp:
     """Main application class for real-time voice conversation"""
@@ -115,41 +116,44 @@ class RealTimeConversationApp:
         """Main conversation processing loop"""
         while self.is_running and self.conversation_active:
             try:
-                # Check for audio input
-                audio_file = self.audio_capture.get_audio_file(timeout=1.0)
+                # Get latest audio file (no queue, no timeout)
+                audio_file = self.audio_capture.get_latest_audio_file()
                 
                 if audio_file:
-                    print(f"🎤 Processing audio: {audio_file}")
+                    print(f"🎤 Processing latest audio: {audio_file}")
+                    debug_logger.log_audio_capture(audio_file)
                     
                     # Transcribe audio to text
                     transcribed_text = self.stt_service.transcribe(audio_file)
+                    debug_logger.log_transcription(audio_file, transcribed_text)
                     
                     if transcribed_text and transcribed_text.strip():
                         print(f"👤 You said: {transcribed_text}")
                         
                         # Check for exit commands
                         if self._is_exit_command(transcribed_text):
+                            debug_logger.log_system_event("exit_command_detected", {"text": transcribed_text})
                             self._handle_exit()
                             break
                             
                         # Process with OpenAI agent
                         intent, ai_response = self.intent_processor.process_with_intent(transcribed_text)
+                        debug_logger.log_ai_response(transcribed_text, ai_response, intent)
                         print(f"🤖 AI Response: {ai_response}")
                         
                         # Convert response to speech
-                        self.tts_service.speak(ai_response)
+                        tts_success = self.tts_service.speak(ai_response)
+                        debug_logger.log_tts_output(ai_response, success=tts_success)
                         
                         # Update activity timestamp
                         self.last_activity = time.time()
                         
                     else:
                         print("🔇 No speech detected")
-                        
-                    # Clean up audio file
-                    try:
-                        os.unlink(audio_file)
-                    except:
-                        pass
+                        debug_logger.log_system_event("no_speech_detected")
+                    
+                    # Clear the processed file
+                    self.audio_capture.clear_latest_audio()
                         
                 else:
                     # Check for conversation timeout
@@ -176,6 +180,7 @@ class RealTimeConversationApp:
     def _cleanup(self):
         """Clean up resources"""
         print("Cleaning up...")
+        debug_logger.log_system_event("cleanup_started")
         
         if self.audio_capture:
             self.audio_capture.cleanup()
@@ -183,6 +188,9 @@ class RealTimeConversationApp:
         if self.tts_service:
             self.tts_service.stop_all()
             
+        # Save debug logs
+        debug_logger.save_logs()
+        
         self.is_running = False
         print("Cleanup complete.")
         

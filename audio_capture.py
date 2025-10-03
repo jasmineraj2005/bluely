@@ -2,7 +2,6 @@ import pyaudio
 import wave
 import numpy as np
 import threading
-import queue
 import time
 from typing import Optional, Callable
 from config import Config
@@ -19,8 +18,11 @@ class AudioCapture:
         self.audio = pyaudio.PyAudio()
         self.stream = None
         self.is_recording = False
-        self.audio_queue = queue.Queue()
         self.recording_thread = None
+        
+        # Single latest file approach
+        self.latest_audio_file = None
+        self.lock = threading.Lock()
         
         # Voice activity detection
         self.silence_threshold = 100  # Lower threshold for better sensitivity
@@ -82,7 +84,8 @@ class AudioCapture:
     def _audio_callback(self, in_data, frame_count, time_info, status):
         """Callback for real-time audio processing"""
         if self.is_recording:
-            self.audio_queue.put(in_data)
+            # Store audio data for processing
+            pass
         return (in_data, pyaudio.paContinue)
         
     def _manual_recording(self):
@@ -183,36 +186,50 @@ class AudioCapture:
             return False
     
     def _save_audio_chunk(self, frames):
-        """Save audio chunk to temporary file"""
+        """Save audio chunk, replacing the previous one"""
         timestamp = int(time.time() * 1000)
         filename = f"temp_audio_{timestamp}.wav"
         
         try:
-            with wave.open(filename, 'wb') as wf:
-                wf.setnchannels(self.channels)
-                wf.setsampwidth(self.audio.get_sample_size(self.format))
-                wf.setframerate(self.sample_rate)
-                wf.writeframes(b''.join(frames))
+            with self.lock:
+                # Delete old file if it exists
+                if self.latest_audio_file:
+                    try:
+                        import os
+                        os.unlink(self.latest_audio_file)
+                        print(f"🗑️ Deleted old audio: {self.latest_audio_file}")
+                    except:
+                        pass
                 
-            # Put filename in queue for processing
-            self.audio_queue.put(filename)
-            
+                # Save new file
+                with wave.open(filename, 'wb') as wf:
+                    wf.setnchannels(self.channels)
+                    wf.setsampwidth(self.audio.get_sample_size(self.format))
+                    wf.setframerate(self.sample_rate)
+                    wf.writeframes(b''.join(frames))
+                    
+                # Update latest file
+                self.latest_audio_file = filename
+                print(f"💾 Saved new audio: {filename}")
+                
         except Exception as e:
             print(f"Error saving audio chunk: {e}")
             
-    def get_audio_data(self, timeout: float = 1.0) -> Optional[bytes]:
-        """Get audio data from the queue"""
-        try:
-            return self.audio_queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
+    def get_latest_audio_file(self) -> Optional[str]:
+        """Get the latest audio file"""
+        with self.lock:
+            return self.latest_audio_file
             
-    def get_audio_file(self, timeout: float = 1.0) -> Optional[str]:
-        """Get audio file path from the queue"""
-        try:
-            return self.audio_queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
+    def clear_latest_audio(self):
+        """Clear the latest audio file"""
+        with self.lock:
+            if self.latest_audio_file:
+                try:
+                    import os
+                    os.unlink(self.latest_audio_file)
+                except:
+                    pass
+                self.latest_audio_file = None
             
     def cleanup(self):
         """Clean up resources"""

@@ -76,8 +76,8 @@ class ElevenLabsSTT:
     def is_available(self) -> bool:
         """Check if the STT service is available"""
         try:
-            # Test the API with a simple request
-            url = f"{self.base_url}/user"
+            # Test the API with a simple request to voices endpoint
+            url = f"{self.base_url}/voices"
             response = requests.get(url, headers=self.headers)
             return response.status_code == 200
         except:
